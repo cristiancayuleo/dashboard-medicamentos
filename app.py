@@ -93,7 +93,7 @@ def tabla_centros(df):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("Quinta Normal · Cenabast Comunal")
+st.sidebar.caption("Cenabast Comunal")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Negociación inteligente (ML)"])
