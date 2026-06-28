@@ -12,6 +12,9 @@ st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
 DATA = "datos_preparados.xlsx"
 IVA = 1.19
 COL = px.colors.qualitative.Safe
+MESES = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+         7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre",
+         11: "Noviembre", 12: "Diciembre"}
 
 
 @st.cache_data
@@ -21,11 +24,6 @@ def cargar():
     det["MONTO_IVA"] = det["VALORIZADO ENTREGADO"] * IVA
     det["MES_NUM"] = det["FECHA CRUCE"].dt.month
     return det
-
-
-MESES = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
-         7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre",
-         11: "Noviembre", 12: "Diciembre"}
 
 
 det = cargar()
@@ -39,13 +37,16 @@ def miles(x):
     return f"{x:,.0f}".replace(",", ".")
 
 
+def ayuda(texto):
+    st.caption("ℹ️ " + texto)
+
+
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
 st.sidebar.caption("Quinta Normal · ICP")
 pagina = st.sidebar.radio(
     "Sección",
-    ["Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"],
-)
+    ["Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
 st.sidebar.markdown("---")
 st.sidebar.subheader("Filtros")
 anios = sorted(det["AÑO"].unique())
@@ -58,6 +59,7 @@ tipos = sorted(det["TIPO DE PRODUCTO"].unique())
 sel_tipos = st.sidebar.multiselect("Tipo de producto", tipos, default=tipos)
 destinos = sorted(det["NOMBRE DESTINATARIO"].unique())
 sel_dest = st.sidebar.multiselect("Punto de entrega", destinos, default=destinos)
+st.sidebar.caption("Los filtros se aplican a todas las secciones.")
 
 f = det[
     det["AÑO"].isin(sel_anios)
@@ -74,7 +76,18 @@ if f.empty:
 # ===================== Panorama general =====================
 if pagina == "Panorama general":
     st.title("Panorama general de la distribución")
-    st.caption("Visión global de lo que se distribuye a la red de salud comunal.")
+    st.caption("Visión global de lo que se distribuye a la red de salud comunal. "
+               "Usa los filtros de la izquierda para acotar por año, mes, tipo o punto de entrega.")
+
+    with st.expander("📌 Cómo usar este tablero (guía rápida)"):
+        st.markdown(
+            "- **Panorama general:** la foto completa del gasto y la confiabilidad del abastecimiento.\n"
+            "- **Puntos de entrega:** qué y cuánto llega a cada centro de la comuna.\n"
+            "- **Proveedores:** en quién concentrar la gestión (peso y deuda).\n"
+            "- **Productos:** qué se pide, con qué frecuencia y su evolución entre años.\n"
+            "- **Segmentación (ML):** agrupa proveedores con comportamiento parecido.\n\n"
+            "Cada gráfico tiene una nota **ℹ️** que explica cómo leerlo. Los **filtros** de la "
+            "izquierda se aplican a todas las secciones.")
 
     c = st.columns(6)
     c[0].metric("Monto final (+IVA)", clp(f["MONTO_IVA"].sum()))
@@ -83,45 +96,50 @@ if pagina == "Panorama general":
     c[3].metric("Productos (canasta)", f["CODIGO GENERICO"].nunique())
     c[4].metric("% Aprobado", f"{(f['ESTADO CENABAST']=='APROBADO').mean()*100:.0f}%")
     c[5].metric("% Susp. x deuda", f"{(f['ESTADO CENABAST']=='SUSP. X DEUDA').mean()*100:.0f}%")
+    ayuda("Tarjetas resumen: el gasto total, cuánto se entregó y qué parte está aprobada vs. "
+          "detenida por deuda (lo que la organización puede gestionar).")
 
     st.divider()
     a, b = st.columns(2)
     serie = f.groupby("FECHA CRUCE")["MONTO_IVA"].sum().reset_index()
     a.plotly_chart(
-        px.area(serie, x="FECHA CRUCE", y="MONTO_IVA",
-                title="Monto distribuido por mes (+IVA)",
+        px.area(serie, x="FECHA CRUCE", y="MONTO_IVA", title="Monto distribuido por mes (+IVA)",
                 labels={"MONTO_IVA": "Monto (+IVA)", "FECHA CRUCE": "Mes"}),
         use_container_width=True)
+    a.caption("ℹ️ Cómo leerlo: la evolución del gasto mensual. Sirve para ver estacionalidad "
+              "y meses atípicos (ej. caídas en enero).")
     est = f["ESTADO CENABAST"].value_counts().reset_index()
     est.columns = ["Estado", "Líneas"]
     b.plotly_chart(
-        px.bar(est, x="Estado", y="Líneas", color="Estado",
-               color_discrete_sequence=COL, title="Estado de las solicitudes"),
+        px.bar(est, x="Estado", y="Líneas", color="Estado", color_discrete_sequence=COL,
+               title="Estado de las solicitudes"),
         use_container_width=True)
+    b.caption("ℹ️ Cómo leerlo: cuántas solicitudes hay en cada estado. 'Aprobado' y "
+              "'Susp. x deuda' son las que dependen de la gestión interna.")
 
     st.subheader("Confiabilidad del abastecimiento en el tiempo")
-    st.caption("Qué porcentaje de lo solicitado se aprueba vs se suspende por deuda, mes a mes.")
     ts = f.groupby("FECHA CRUCE").agg(
         Aprobado=("ESTADO CENABAST", lambda s: (s == "APROBADO").mean() * 100),
         Suspendido=("ESTADO CENABAST", lambda s: (s == "SUSP. X DEUDA").mean() * 100),
     ).reset_index().melt("FECHA CRUCE", var_name="Estado", value_name="Porcentaje")
     st.plotly_chart(
         px.line(ts, x="FECHA CRUCE", y="Porcentaje", color="Estado", markers=True,
-                color_discrete_sequence=COL,
-                labels={"FECHA CRUCE": "Mes"}),
+                color_discrete_sequence=COL, labels={"FECHA CRUCE": "Mes"}),
         use_container_width=True)
+    ayuda("Cómo usarlo: si la línea de suspendido por deuda sube, el abastecimiento se vuelve "
+          "menos confiable ese mes. Picos indican meses que requieren atención de gestión.")
 
 
 # ===================== Puntos de entrega =====================
 elif pagina == "Puntos de entrega":
     st.title("Puntos de entrega")
-    st.caption("Qué llega a cada punto de dispensación de la comuna (el consumidor final).")
+    st.caption("Qué llega a cada punto de dispensación de la comuna (el consumidor final). "
+               "Permite comparar el peso y la confiabilidad entre puntos.")
 
     g = f.groupby("NOMBRE DESTINATARIO").agg(
         monto_iva=("MONTO_IVA", "sum"),
         unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
-        canasta=("CODIGO GENERICO", "nunique"),
-    ).reset_index()
+        canasta=("CODIGO GENERICO", "nunique")).reset_index()
     g["pct_aprob"] = f.groupby("NOMBRE DESTINATARIO")["ESTADO CENABAST"].apply(
         lambda s: (s == "APROBADO").mean() * 100).values
     g["pct_susp"] = f.groupby("NOMBRE DESTINATARIO")["ESTADO CENABAST"].apply(
@@ -134,12 +152,16 @@ elif pagina == "Puntos de entrega":
                title="Monto entregado por punto (+IVA)",
                labels={"monto_iva": "Monto (+IVA)", "NOMBRE DESTINATARIO": ""}),
         use_container_width=True)
+    a.caption("ℹ️ Cómo leerlo: qué punto concentra más gasto. El más largo es donde se "
+              "destina más presupuesto.")
     b.plotly_chart(
         px.bar(g.sort_values("canasta"), x="canasta", y="NOMBRE DESTINATARIO",
                orientation="h", color="NOMBRE DESTINATARIO", color_discrete_sequence=COL,
                title="Canasta por punto (nº de productos distintos)",
                labels={"canasta": "Productos distintos", "NOMBRE DESTINATARIO": ""}),
         use_container_width=True)
+    b.caption("ℹ️ Cómo leerlo: la variedad de productos que maneja cada punto. Una canasta "
+              "amplia implica logística más compleja.")
 
     st.subheader("Resumen por punto de entrega")
     tg = g.rename(columns={"NOMBRE DESTINATARIO": "Punto", "monto_iva": "Monto (+IVA)",
@@ -149,6 +171,8 @@ elif pagina == "Puntos de entrega":
     tg["% Susp. deuda"] = tg["% Susp. deuda"].round(0)
     st.dataframe(tg.sort_values("Monto (+IVA)", ascending=False),
                  use_container_width=True, hide_index=True)
+    ayuda("Compara puntos de un vistazo: monto, variedad y qué tan aprobado/suspendido está "
+          "cada uno.")
 
     st.subheader("¿Qué se entrega en cada punto?")
     punto = st.selectbox("Elige un punto de entrega", destinos)
@@ -161,59 +185,85 @@ elif pagina == "Puntos de entrega":
                    orientation="h", title=f"Top 12 productos en {punto} (Monto +IVA)",
                    labels={"MONTO_IVA": "Monto (+IVA)", "NOMBRE GENERICO CANONICO": ""}),
             use_container_width=True)
+        ayuda("Cómo usarlo: los productos donde más presupuesto se destina en ese punto; "
+              "útil para priorizar negociación y control de stock.")
 
 
 # ===================== Proveedores =====================
 elif pagina == "Proveedores":
     st.title("Proveedores que abastecen la red")
-    st.caption("Peso y comportamiento de cada proveedor en el abastecimiento.")
+    st.caption("Peso de cada proveedor y dónde se concentra el foco de gestión. "
+               "Pasa el mouse sobre los puntos para ver el nombre de cada proveedor.")
 
     base = f.groupby(["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"])
     g = base.agg(
         monto_iva=("MONTO_IVA", "sum"),
         unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
-        n_productos=("CODIGO GENERICO", "nunique"),
-    ).reset_index()
+        n_productos=("CODIGO GENERICO", "nunique")).reset_index()
     g["pct_susp"] = base["ESTADO CENABAST"].apply(
-        lambda s: (s == "SUSP. X DEUDA").mean()).values
+        lambda s: (s == "SUSP. X DEUDA").mean()).values * 100
+    # Monto detenido por deuda por proveedor
+    ms = (f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"]
+          .groupby(["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"])["MONTO_IVA"].sum()
+          .rename("monto_susp").reset_index())
+    g = g.merge(ms, on=["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"], how="left")
+    g["monto_susp"] = g["monto_susp"].fillna(0)
     g["peso_%"] = g["monto_iva"] / g["monto_iva"].sum() * 100
 
     grupos = sorted(g["GRUPO"].unique())
     sel_g = st.multiselect("Filtrar por grupo de proveedor", grupos, default=grupos)
     g = g[g["GRUPO"].isin(sel_g)]
     topn = st.slider("Mostrar top N proveedores", 5, 30, 10)
-    top = g.sort_values("monto_iva", ascending=False).head(topn)
 
     a, b = st.columns(2)
+    top = g.sort_values("monto_iva", ascending=False).head(topn)
     a.plotly_chart(
         px.bar(top.sort_values("monto_iva"), x="monto_iva", y="NOMBRE PROVEEDOR",
                orientation="h", color="GRUPO", color_discrete_sequence=COL,
                title=f"Top {topn} proveedores por monto (+IVA)",
                labels={"monto_iva": "Monto (+IVA)", "NOMBRE PROVEEDOR": ""}),
         use_container_width=True)
+    a.caption("ℹ️ Cómo leerlo: el peso de cada proveedor en el gasto total. Concentración alta "
+              "= mayor dependencia de pocos proveedores.")
+    tops = g.sort_values("monto_susp", ascending=False).head(topn)
     b.plotly_chart(
-        px.scatter(g, x="monto_iva", y="pct_susp", size="n_productos", color="GRUPO",
-                   color_discrete_sequence=COL, hover_name="NOMBRE PROVEEDOR",
-                   title="Perfil: monto vs % suspendido por deuda",
-                   labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"}),
+        px.bar(tops.sort_values("monto_susp"), x="monto_susp", y="NOMBRE PROVEEDOR",
+               orientation="h", color="GRUPO", color_discrete_sequence=COL,
+               title=f"Top {topn} por monto detenido por deuda (+IVA)",
+               labels={"monto_susp": "Monto suspendido (+IVA)", "NOMBRE PROVEEDOR": ""}),
         use_container_width=True)
+    b.caption("ℹ️ Cómo usarlo: dónde se concentra el dinero retenido por deuda. Estos "
+              "proveedores son el foco prioritario para resolver y gestionar.")
+
+    st.subheader("Mapa de proveedores: peso vs. deuda")
+    med = g["monto_iva"].median()
+    fig = px.scatter(g, x="monto_iva", y="pct_susp", size="n_productos", color="GRUPO",
+                     color_discrete_sequence=COL, hover_name="NOMBRE PROVEEDOR",
+                     labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"})
+    fig.add_vline(x=med, line_dash="dash", line_color="gray")
+    fig.add_hline(y=30, line_dash="dash", line_color="gray")
+    st.plotly_chart(fig, use_container_width=True)
+    ayuda("Cómo usarlo: el cuadrante superior derecho (alto monto + alta suspensión por deuda) "
+          "reúne a los proveedores prioritarios para gestionar. El tamaño del punto es la "
+          "variedad de productos que entrega.")
 
     st.subheader("Detalle de proveedores")
     tabla = g.sort_values("monto_iva", ascending=False).rename(columns={
-        "NOMBRE PROVEEDOR": "Proveedor", "n_productos": "Canasta",
-        "unidades": "Unidades", "monto_iva": "Monto (+IVA)", "peso_%": "Peso %"})
-    tabla["pct_susp"] = (tabla["pct_susp"] * 100).round(0)
+        "NOMBRE PROVEEDOR": "Proveedor", "n_productos": "Canasta", "unidades": "Unidades",
+        "monto_iva": "Monto (+IVA)", "monto_susp": "Monto susp. deuda",
+        "peso_%": "Peso %", "pct_susp": "% Susp. deuda"})
     tabla["Peso %"] = tabla["Peso %"].round(2)
-    tabla = tabla.rename(columns={"pct_susp": "% Susp. deuda"})
+    tabla["% Susp. deuda"] = tabla["% Susp. deuda"].round(0)
     st.dataframe(tabla[["Proveedor", "GRUPO", "Canasta", "Unidades", "Monto (+IVA)",
-                        "Peso %", "% Susp. deuda"]],
-                 use_container_width=True, height=380, hide_index=True)
+                        "Monto susp. deuda", "Peso %", "% Susp. deuda"]],
+                 use_container_width=True, height=360, hide_index=True)
 
 
 # ===================== Productos =====================
 elif pagina == "Productos":
     st.title("Catálogo de productos y frecuencia")
-    st.caption("Volumen, monto y cada cuánto se pide cada producto.")
+    st.caption("Volumen, monto y cada cuánto se pide cada producto. Abajo puedes analizar un "
+               "producto a través de los años.")
 
     cc1, cc2 = st.columns(2)
     solo_ctrl = cc1.checkbox("Solo controlados (psicotrópicos)", value=False)
@@ -230,8 +280,7 @@ elif pagina == "Productos":
     pg = pf.groupby(["CODIGO GENERICO", "NOMBRE GENERICO CANONICO"]).agg(
         unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
         monto_iva=("MONTO_IVA", "sum"),
-        meses_pedido=("FECHA CRUCE", "nunique"),
-    ).reset_index()
+        meses_pedido=("FECHA CRUCE", "nunique")).reset_index()
 
     k = st.columns(3)
     k[0].metric("Productos", pg.shape[0])
@@ -246,32 +295,60 @@ elif pagina == "Productos":
                orientation="h", title=f"Top {topn} por monto (+IVA)",
                labels={"monto_iva": "Monto (+IVA)", "NOMBRE GENERICO CANONICO": ""}),
         use_container_width=True)
+    a.caption("ℹ️ Cómo leerlo: los productos que concentran más presupuesto. Foco para control "
+              "de costos y negociación.")
     tf = pg.sort_values("meses_pedido", ascending=False).head(topn)
     b.plotly_chart(
         px.bar(tf.sort_values("meses_pedido"), x="meses_pedido", y="NOMBRE GENERICO CANONICO",
                orientation="h", title=f"Top {topn} más frecuentes (meses con pedido)",
                labels={"meses_pedido": "Meses con pedido", "NOMBRE GENERICO CANONICO": ""}),
         use_container_width=True)
+    b.caption("ℹ️ Cómo leerlo: productos de demanda recurrente (se piden casi todos los meses). "
+              "Son los más críticos de no quebrar stock.")
+
+    st.subheader("Un producto a través de los años")
+    prod_sel = st.selectbox("Elige un producto", sorted(pf["NOMBRE GENERICO CANONICO"].unique()))
+    pp = pf[pf["NOMBRE GENERICO CANONICO"] == prod_sel]
+    por_anio = pp.groupby("AÑO").agg(
+        unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
+        pct_aprob=("ESTADO CENABAST", lambda s: (s == "APROBADO").mean() * 100),
+        pct_falta=("ESTADO CENABAST", lambda s: (s.isin(["FALTANTE", "SUSP. X DEUDA"])).mean() * 100),
+    ).reset_index()
+    por_anio["AÑO"] = por_anio["AÑO"].astype(str)
+    a2, b2 = st.columns(2)
+    a2.plotly_chart(
+        px.bar(por_anio, x="AÑO", y="unidades", title=f"Unidades entregadas por año — {prod_sel}",
+               labels={"unidades": "Unidades entregadas", "AÑO": "Año"}),
+        use_container_width=True)
+    b2.plotly_chart(
+        px.line(por_anio, x="AÑO", y="pct_falta", markers=True,
+                title="% no entregado (faltante o susp. por deuda)",
+                labels={"pct_falta": "% no entregado", "AÑO": "Año"}),
+        use_container_width=True)
+    ayuda("Cómo usarlo: compara la demanda real (lo entregado) entre años. Ojo: si un producto "
+          "se sigue pidiendo pero figura como faltante o suspendido (línea de la derecha alta), "
+          "su 'demanda' aparente puede no reflejar el consumo real. Comparar años ayuda a "
+          "distinguir demanda genuina de pedidos arrastrados que no se cumplieron.")
 
     st.subheader("Detalle de productos")
     det_tab = pg.sort_values("monto_iva", ascending=False).rename(columns={
         "NOMBRE GENERICO CANONICO": "Producto", "CODIGO GENERICO": "Código",
         "unidades": "Unidades", "monto_iva": "Monto (+IVA)", "meses_pedido": "Meses pedido"})
-    st.dataframe(det_tab, use_container_width=True, height=380, hide_index=True)
+    st.dataframe(det_tab, use_container_width=True, height=360, hide_index=True)
 
 
 # ===================== Segmentación (ML) =====================
 elif pagina == "Segmentación (ML)":
     st.title("Segmentación de proveedores (Machine Learning)")
-    st.caption("Un modelo de clustering agrupa a los proveedores según su comportamiento: "
-               "monto, unidades, diversidad de canasta y % suspendido por deuda.")
+    st.caption("Un modelo agrupa automáticamente a los proveedores con comportamiento parecido "
+               "(monto, unidades, variedad y % suspendido por deuda), revelando perfiles para "
+               "tratar a cada grupo de forma distinta.")
 
     base = f.groupby(["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"])
     prov = base.agg(
         monto_iva=("MONTO_IVA", "sum"),
         unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
-        n_productos=("CODIGO GENERICO", "nunique"),
-    ).reset_index()
+        n_productos=("CODIGO GENERICO", "nunique")).reset_index()
     prov["pct_susp"] = base["ESTADO CENABAST"].apply(
         lambda s: (s == "SUSP. X DEUDA").mean()).values
 
@@ -294,6 +371,8 @@ elif pagina == "Segmentación (ML)":
     c1, c2 = st.columns([2, 1])
     k = c1.slider("Número de grupos", 2, kmax, k_sug)
     c2.metric("Sugerencia del modelo", f"{k_sug} grupos")
+    ayuda("El modelo sugiere el número de grupos que mejor separa a los proveedores. Puedes "
+          "moverlo para explorar más o menos grupos.")
 
     km = KMeans(n_clusters=k, n_init=10, random_state=42).fit(Xs)
     prov["cluster"] = km.labels_
@@ -326,6 +405,8 @@ elif pagina == "Segmentación (ML)":
                    title="Grupos de proveedores",
                    labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"}),
         use_container_width=True)
+    ayuda("Cómo leerlo: cada color es un perfil de proveedor. Los grupos de alto monto con "
+          "alta suspensión por deuda son los que más conviene atender de cerca.")
 
     st.subheader("Perfil de cada grupo (promedios)")
     tp = perfil.copy()
