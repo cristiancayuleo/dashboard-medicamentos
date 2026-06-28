@@ -591,6 +591,28 @@ elif pagina == "Negociación inteligente (ML)":
     st.subheader("2️⃣ Segmentación de proveedores (modelo de ML · K-Means)")
     st.caption("El modelo agrupa proveedores con comportamiento parecido (no predice: descubre "
                "patrones). Cada grupo se gestiona de forma distinta.")
+
+    with st.expander("📘 ¿Qué es esto y cómo me sirve? (explicación con ejemplo)"):
+        st.markdown(
+            "**El problema.** Tenemos ~180 proveedores. Revisarlos uno por uno para decidir a "
+            "quién priorizar es inviable.\n\n"
+            "**Qué hace el modelo.** *K-Means* es un modelo de Machine Learning que los **agrupa "
+            "automáticamente** según se parezcan en cuatro cosas: cuánto dinero mueven, cuántas "
+            "unidades, qué tan variada es su canasta y qué % tienen suspendido por deuda. "
+            "Nosotros no le damos las reglas: el modelo descubre solo los grupos.\n\n"
+            "**Para qué sirve.** En vez de 180 casos sueltos, quedan unos pocos **tipos de "
+            "proveedor**, y a cada tipo le aplicas una estrategia: a los *grandes con alta deuda* "
+            "→ negociación prioritaria; a los *menores* → seguimiento liviano.\n\n"
+            "**Cómo leer el gráfico.** Cada punto es un proveedor. Más a la **derecha** = mueve "
+            "más dinero. Más **arriba** = más % suspendido por deuda. El **tamaño** del punto es "
+            "la variedad de productos. El **color** es el grupo que el modelo le asignó.\n\n"
+            "**Ejemplo.** Dos proveedores que venden productos totalmente distintos, pero que "
+            "ambos mueven mucho dinero y tienen alta deuda, caen en el **mismo grupo** — porque "
+            "para la gestión piden la misma acción: sentarse a negociar la deuda. Ese grupo "
+            "(arriba a la derecha) es tu foco.\n\n"
+            "*El número de grupos lo sugiere el propio modelo; puedes moverlo para ver más o "
+            "menos detalle.*")
+
     base = fx.groupby("PROVEEDOR_NEG")
     prov = base.agg(monto_iva=("MONTO_IVA", "sum"),
                     unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
@@ -639,6 +661,19 @@ elif pagina == "Negociación inteligente (ML)":
             use_container_width=True)
         ayuda("Cada color es un perfil. Los grupos de alto monto con alta suspensión por deuda son "
               "los que más conviene atender (ej.: el holding OPKO–ARAMA si está consolidado).")
+
+        st.markdown("**Perfil de cada grupo (promedios)** — qué representa cada color")
+        tp = perfil.copy()
+        tp.index = tp.index.map(nombres)
+        tp = pd.DataFrame({
+            "Proveedores": prov.groupby("cluster").size().rename(index=nombres),
+            "Monto prom. (+IVA)": tp["monto_iva"].apply(clp),
+            "% Susp. deuda prom.": (tp["pct_susp"] * 100).round(0),
+            "Canasta prom.": tp["n_productos"].round(0),
+        })
+        st.dataframe(tp, use_container_width=True)
+        ayuda("Lee cada fila como un 'tipo' de proveedor: cuántos hay, cuánto mueven en promedio, "
+              "qué % de deuda y qué tan amplia es su canasta. Así sabes qué hacer con cada grupo.")
     else:
         st.info("Muy pocos proveedores con los filtros actuales para segmentar.")
 
