@@ -150,7 +150,7 @@ if pagina == "Inicio":
     d[3].metric("Unidades afectadas", miles(riesgo_mes["CANTIDAD UNITARIA A DESPACHAR"].sum()))
 
     st.divider()
-    st.subheader(f"🚨 Medicamentos en riesgo de no llegar — {mes_lbl}")
+    st.subheader(f"🚨 Medicamentos con suspensión por deuda Cenabast — {mes_lbl}")
     if riesgo_mes.empty:
         st.success("Sin medicamentos en riesgo para el último mes con los filtros actuales.")
     else:
@@ -163,7 +163,7 @@ if pagina == "Inicio":
     ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
           "podrían no llegar a los centros.")
 
-    st.markdown(f"#### 🗓️ Acción inmediata — solo el último mes ({mes_lbl})")
+    st.markdown(f"#### 🗓️ Acción inmediata — mes ({mes_lbl})")
     st.info("Estas dos tablas consideran **únicamente el último mes**, para gestión inmediata. "
             "Más abajo encontrarás las mismas tablas para **todo el período** seleccionado.")
     st.markdown("**🚦 Proveedores a priorizar este mes**")
@@ -210,7 +210,7 @@ if pagina == "Inicio":
           "suspendidas por deuda. Mientras más alto, más desabastecido queda ese centro (su "
           "detalle está en la sección 'Puntos de entrega').")
 
-    st.subheader("🚦 Proveedores: prioridad de negociación (período completo)")
+    st.subheader("🚦 Proveedores: prioridad de negociación (filtrar en caso de querer algún año y/o mes en particular)")
     st.dataframe(tabla_prioridad_proveedores(f), use_container_width=True, hide_index=True)
     ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
           "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
@@ -255,13 +255,13 @@ elif pagina == "Panorama general":
     est = f["ESTADO CENABAST"].value_counts().reset_index()
     est.columns = ["Estado", "Líneas"]
     b.plotly_chart(
-        px.bar(est, x="Estado", y="Líneas", color="Estado", color_discrete_sequence=COL,
-               title="Estado de las solicitudes"),
+        px.bar(est, x="Estado", y="Cantidad Productos", color="Estado", color_discrete_sequence=COL,
+               title="Estado de las solicitudes (filtrar en caso de querer algún año y/o mes en particular)"),
         use_container_width=True)
     b.caption("ℹ️ Cómo leerlo: cuántas solicitudes hay en cada estado. 'Aprobado' y "
               "'Susp. x deuda' son las que dependen de la gestión interna.")
 
-    st.subheader("Confiabilidad del abastecimiento en el tiempo")
+    st.subheader("Confiabilidad del abastecimiento en el tiempo (Este gráfico deja fuera a los productos Suspendidos , Faltantes, Eliminados y Pendientes, puesto que, dichos estados son exclusivamente potestad de Cenabast")
     ts = f.groupby("FECHA CRUCE").agg(
         Aprobado=("ESTADO CENABAST", lambda s: (s == "APROBADO").mean() * 100),
         Suspendido=("ESTADO CENABAST", lambda s: (s == "SUSP. X DEUDA").mean() * 100),
