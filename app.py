@@ -261,7 +261,7 @@ elif pagina == "Panorama general":
     b.caption("ℹ️ Cómo leerlo: cuántas solicitudes hay en cada estado. 'Aprobado' y "
               "'Susp. x deuda' son las que dependen de la gestión interna.")
 
-    st.subheader("Confiabilidad del abastecimiento en el tiempo (Este gráfico deja fuera a los productos Suspendidos , Faltantes, Eliminados y Pendientes, puesto que, dichos estados son exclusivamente potestad de Cenabast)")
+    st.subheader("Confiabilidad del abastecimiento en el tiempo -Este gráfico deja fuera a los productos Suspendidos , Faltantes, Eliminados y Pendientes, puesto que, dichos estados son exclusivamente potestad de Cenabast-")
     ts = f.groupby("FECHA CRUCE").agg(
         Aprobado=("ESTADO CENABAST", lambda s: (s == "APROBADO").mean() * 100),
         Suspendido=("ESTADO CENABAST", lambda s: (s == "SUSP. X DEUDA").mean() * 100),
