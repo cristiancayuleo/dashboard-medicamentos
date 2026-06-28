@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
+st.set_page_config(page_title="Distribución de Medicamentos · By Cristian Cayuleo",
                    page_icon="💊", layout="wide")
 
 DATA = "datos_preparados.xlsx"
