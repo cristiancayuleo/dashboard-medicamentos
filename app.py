@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
+st.set_page_config(page_title="Distribución de Medicamentos · Cris y Susu",
                    page_icon="💊", layout="wide")
 
 DATA = "datos_preparados.xlsx"
@@ -93,7 +93,7 @@ def tabla_centros(df):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("Quinta Normal · ICP")
+st.sidebar.caption("Quinta Normal · Cris y Susu")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Negociación inteligente (ML)"])
