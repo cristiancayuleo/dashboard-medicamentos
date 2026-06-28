@@ -158,6 +158,7 @@ if pagina == "Inicio":
              ["MONTO_IVA"].sum().reset_index().sort_values("MONTO_IVA", ascending=False)
              .rename(columns={"NOMBRE GENERICO CANONICO": "Medicamento", "ESTADO CENABAST": "Estado",
                               "NOMBRE PROVEEDOR": "Proveedor", "MONTO_IVA": "Monto (+IVA)"}))
+        r["Monto (+IVA)"] = r["Monto (+IVA)"].apply(clp)
         st.dataframe(r, use_container_width=True, hide_index=True, height=280)
     ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
           "podrían no llegar a los centros.")
@@ -310,10 +311,12 @@ elif pagina == "Puntos de entrega":
     tg = g.rename(columns={"NOMBRE DESTINATARIO": "Punto", "monto_iva": "Monto (+IVA)",
                            "unidades": "Unidades", "canasta": "Canasta",
                            "pct_aprob": "% Aprobado", "pct_susp": "% Susp. deuda"})
+    tg = tg.sort_values("Monto (+IVA)", ascending=False)
     tg["% Aprobado"] = tg["% Aprobado"].round(0)
     tg["% Susp. deuda"] = tg["% Susp. deuda"].round(0)
-    st.dataframe(tg.sort_values("Monto (+IVA)", ascending=False),
-                 use_container_width=True, hide_index=True)
+    tg["Monto (+IVA)"] = tg["Monto (+IVA)"].apply(clp)
+    tg["Unidades"] = tg["Unidades"].apply(miles)
+    st.dataframe(tg, use_container_width=True, hide_index=True)
     ayuda("Compara puntos de un vistazo: monto, variedad y qué tan aprobado/suspendido está "
           "cada uno.")
 
@@ -429,6 +432,9 @@ elif pagina == "Proveedores":
         "peso_%": "Peso %", "pct_susp": "% Susp. deuda"})
     tabla["Peso %"] = tabla["Peso %"].round(2)
     tabla["% Susp. deuda"] = tabla["% Susp. deuda"].round(0)
+    tabla["Unidades"] = tabla["Unidades"].apply(miles)
+    tabla["Monto (+IVA)"] = tabla["Monto (+IVA)"].apply(clp)
+    tabla["Monto susp. deuda"] = tabla["Monto susp. deuda"].apply(clp)
     st.dataframe(tabla[["Proveedor", "GRUPO", "Canasta", "Unidades", "Monto (+IVA)",
                         "Monto susp. deuda", "Peso %", "% Susp. deuda"]],
                  use_container_width=True, height=360, hide_index=True)
@@ -509,6 +515,8 @@ elif pagina == "Productos":
     det_tab = pg.sort_values("monto_iva", ascending=False).rename(columns={
         "NOMBRE GENERICO CANONICO": "Producto", "CODIGO GENERICO": "Código",
         "unidades": "Unidades", "monto_iva": "Monto (+IVA)", "meses_pedido": "Meses pedido"})
+    det_tab["Unidades"] = det_tab["Unidades"].apply(miles)
+    det_tab["Monto (+IVA)"] = det_tab["Monto (+IVA)"].apply(clp)
     st.dataframe(det_tab, use_container_width=True, height=360, hide_index=True)
 
 
@@ -556,6 +564,28 @@ elif pagina == "Negociación inteligente (ML)":
     ayuda("La clase A son los pocos productos que concentran ~80% del gasto: ahí cada peso "
           "negociado rinde más. En productos básicos de alto volumen, una rebaja pequeña por "
           "unidad genera grandes ahorros (ver simulador abajo).")
+
+    st.markdown("**Proveedores más importantes según ABC**")
+    abcp = (fx.groupby("PROVEEDOR_NEG")
+            .agg(monto=("MONTO_IVA", "sum"), unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
+                 canasta=("CODIGO GENERICO", "nunique"))
+            .sort_values("monto", ascending=False).reset_index())
+    abcp["% del gasto"] = (abcp["monto"] / abcp["monto"].sum() * 100)
+    abcp["acum_%"] = abcp["% del gasto"].cumsum()
+    abcp["Clase"] = abcp["acum_%"].map(lambda a: "A" if a <= 80 else ("B" if a <= 95 else "C"))
+    tabc = pd.DataFrame({
+        "Clase": abcp["Clase"],
+        "Proveedor": abcp["PROVEEDOR_NEG"],
+        "Monto (+IVA)": abcp["monto"].apply(clp),
+        "% del gasto": abcp["% del gasto"].round(1),
+        "% acumulado": abcp["acum_%"].round(0),
+        "Unidades": abcp["unidades"].apply(miles),
+        "Canasta": abcp["canasta"],
+    }).head(20)
+    st.dataframe(tabc, use_container_width=True, hide_index=True, height=360)
+    ayuda("Los proveedores que concentran la mayor parte del gasto (clase A) son los de mayor "
+          "impacto: negociar mejores precios con ellos mueve la aguja del presupuesto. Con el "
+          "holding consolidado, OPKO–ARAMA sube como uno de los más relevantes.")
 
     # ---------- 2) Segmentación de proveedores (K-Means) ----------
     st.subheader("2️⃣ Segmentación de proveedores (modelo de ML · K-Means)")
