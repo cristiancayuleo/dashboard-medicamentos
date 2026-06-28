@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-st.set_page_config(page_title="Distribución de Medicamentos · By Cristian Cayuleo",
+st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
                    page_icon="💊", layout="wide")
 
 DATA = "datos_preparados.xlsx"
@@ -43,7 +43,7 @@ def ayuda(texto):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("By Cristian Cayuleo")
+st.sidebar.caption("Quinta Normal · ICP")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
@@ -90,7 +90,14 @@ if pagina == "Inicio":
     c[0].metric("Monto del período (+IVA)", clp(f["MONTO_IVA"].sum()))
     c[1].metric("% Aprobado", f"{(f['ESTADO CENABAST']=='APROBADO').mean()*100:.0f}%")
     c[2].metric("% Susp. x deuda", f"{(f['ESTADO CENABAST']=='SUSP. X DEUDA').mean()*100:.0f}%")
-    c[3].metric(f"Medicamentos en riesgo · {mes_lbl}", riesgo_mes["CODIGO GENERICO"].nunique())
+    c[3].metric("Proveedores activos", f["NOMBRE PROVEEDOR"].nunique())
+
+    st.markdown(f"**📅 Foco del último mes — {mes_lbl}**")
+    d = st.columns(4)
+    d[0].metric("Valorizado del mes (+IVA)", clp(fm["MONTO_IVA"].sum()))
+    d[1].metric("Monto en riesgo del mes (+IVA)", clp(riesgo_mes["MONTO_IVA"].sum()))
+    d[2].metric("Canasta afectada (productos)", riesgo_mes["CODIGO GENERICO"].nunique())
+    d[3].metric("Unidades afectadas", miles(riesgo_mes["CANTIDAD UNITARIA A DESPACHAR"].sum()))
 
     st.divider()
     st.subheader(f"🚨 Medicamentos en riesgo de no llegar — {mes_lbl}")
@@ -142,10 +149,18 @@ if pagina == "Inicio":
     bp = f.groupby("NOMBRE PROVEEDOR")
     sem = bp.agg(monto_iva=("MONTO_IVA", "sum")).reset_index()
     sem["pct_susp"] = bp["ESTADO CENABAST"].apply(lambda s: (s == "SUSP. X DEUDA").mean() * 100).values
-    ms = (f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"].groupby("NOMBRE PROVEEDOR")["MONTO_IVA"]
-          .sum().rename("monto_susp").reset_index())
-    sem = sem.merge(ms, on="NOMBRE PROVEEDOR", how="left")
-    sem["monto_susp"] = sem["monto_susp"].fillna(0)
+    fsusp = f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"]
+    med_susp = fsusp.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_susp").reset_index()
+    med_tot = f.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_tot").reset_index()
+    ms = fsusp.groupby("NOMBRE PROVEEDOR")["MONTO_IVA"].sum().rename("monto_susp").reset_index()
+    sem = (sem.merge(med_susp, on="NOMBRE PROVEEDOR", how="left")
+              .merge(med_tot, on="NOMBRE PROVEEDOR", how="left")
+              .merge(ms, on="NOMBRE PROVEEDOR", how="left"))
+    sem[["med_susp", "monto_susp"]] = sem[["med_susp", "monto_susp"]].fillna(0)
+    sem["med_susp"] = sem["med_susp"].astype(int)
+    sem["med_sin"] = (sem["med_tot"] - sem["med_susp"]).astype(int)
+    total_det = sem["monto_susp"].sum()
+    sem["peso_det"] = (sem["monto_susp"] / total_det * 100) if total_det else 0
 
     def semaforo(p):
         if p >= 40:
@@ -156,11 +171,17 @@ if pagina == "Inicio":
 
     sem["Prioridad"] = sem["pct_susp"].map(semaforo)
     sem = sem[sem["monto_susp"] > 0].sort_values("monto_susp", ascending=False).head(15)
-    tab = sem.rename(columns={"NOMBRE PROVEEDOR": "Proveedor", "monto_susp": "Monto detenido (+IVA)",
-                              "pct_susp": "% Susp. deuda", "monto_iva": "Monto total (+IVA)"})
-    tab["% Susp. deuda"] = tab["% Susp. deuda"].round(0)
-    st.dataframe(tab[["Prioridad", "Proveedor", "Monto detenido (+IVA)", "% Susp. deuda",
-                      "Monto total (+IVA)"]], use_container_width=True, hide_index=True)
+    tab = pd.DataFrame({
+        "Prioridad": sem["Prioridad"],
+        "Proveedor": sem["NOMBRE PROVEEDOR"],
+        "Med. con susp.": sem["med_susp"],
+        "Med. sin susp.": sem["med_sin"],
+        "Monto detenido (+IVA)": sem["monto_susp"].apply(clp),
+        "Peso detenido %": sem["peso_det"].round(1),
+        "% Susp. deuda": sem["pct_susp"].round(0),
+        "Monto total (+IVA)": sem["monto_iva"].apply(clp),
+    })
+    st.dataframe(tab, use_container_width=True, hide_index=True)
     ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
           "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
           "proveedores con más dinero retenido, donde conviene enfocar las conversaciones.")
