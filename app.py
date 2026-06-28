@@ -41,6 +41,56 @@ def ayuda(texto):
     st.caption("ℹ️ " + texto)
 
 
+def tabla_prioridad_proveedores(df):
+    bp = df.groupby("NOMBRE PROVEEDOR")
+    sem = bp.agg(monto_iva=("MONTO_IVA", "sum")).reset_index()
+    sem["pct_susp"] = bp["ESTADO CENABAST"].apply(lambda s: (s == "SUSP. X DEUDA").mean() * 100).values
+    fsusp = df[df["ESTADO CENABAST"] == "SUSP. X DEUDA"]
+    med_susp = fsusp.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_susp").reset_index()
+    med_tot = df.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_tot").reset_index()
+    ms = fsusp.groupby("NOMBRE PROVEEDOR")["MONTO_IVA"].sum().rename("monto_susp").reset_index()
+    sem = (sem.merge(med_susp, on="NOMBRE PROVEEDOR", how="left")
+              .merge(med_tot, on="NOMBRE PROVEEDOR", how="left")
+              .merge(ms, on="NOMBRE PROVEEDOR", how="left"))
+    sem[["med_susp", "monto_susp"]] = sem[["med_susp", "monto_susp"]].fillna(0)
+    sem["med_susp"] = sem["med_susp"].astype(int)
+    sem["med_sin"] = (sem["med_tot"] - sem["med_susp"]).astype(int)
+    total_det = sem["monto_susp"].sum()
+    sem["peso_det"] = (sem["monto_susp"] / total_det * 100) if total_det else 0
+    sem["Prioridad"] = sem["pct_susp"].map(
+        lambda p: "🔴 Alta" if p >= 40 else ("🟡 Media" if p >= 15 else "🟢 Baja"))
+    sem = sem[sem["monto_susp"] > 0].sort_values("monto_susp", ascending=False).head(15)
+    return pd.DataFrame({
+        "Prioridad": sem["Prioridad"], "Proveedor": sem["NOMBRE PROVEEDOR"],
+        "Med. con susp.": sem["med_susp"], "Med. sin susp.": sem["med_sin"],
+        "Monto detenido (+IVA)": sem["monto_susp"].apply(clp),
+        "Peso detenido %": sem["peso_det"].round(1),
+        "% Susp. deuda": sem["pct_susp"].round(0),
+        "Monto total (+IVA)": sem["monto_iva"].apply(clp)})
+
+
+def tabla_centros(df):
+    rs = ["FALTANTE", "SUSP. X DEUDA"]
+    sc = df.groupby("NOMBRE DESTINATARIO").agg(lineas=("ESTADO CENABAST", "size")).reset_index()
+    sc["en_riesgo"] = df.groupby("NOMBRE DESTINATARIO")["ESTADO CENABAST"].apply(
+        lambda s: s.isin(rs).sum()).values
+    sc["pct_riesgo"] = (sc["en_riesgo"] / sc["lineas"] * 100).round(0)
+    pr = (df[df["ESTADO CENABAST"].isin(rs)].groupby("NOMBRE DESTINATARIO")
+          ["CODIGO GENERICO"].nunique().rename("prod_riesgo").reset_index())
+    md = (df[df["ESTADO CENABAST"].isin(rs)].groupby("NOMBRE DESTINATARIO")
+          ["MONTO_IVA"].sum().rename("monto_detenido").reset_index())
+    sc = sc.merge(pr, on="NOMBRE DESTINATARIO", how="left").merge(md, on="NOMBRE DESTINATARIO", how="left")
+    sc["prod_riesgo"] = sc["prod_riesgo"].fillna(0).astype(int)
+    sc["monto_detenido"] = sc["monto_detenido"].fillna(0)
+    sc["Estado"] = sc["pct_riesgo"].map(
+        lambda p: "🔴 Crítico" if p >= 35 else ("🟡 Medio" if p >= 25 else "🟢 Estable"))
+    sc = sc.sort_values("pct_riesgo", ascending=False)
+    return pd.DataFrame({
+        "Estado": sc["Estado"], "Centro": sc["NOMBRE DESTINATARIO"],
+        "% en riesgo": sc["pct_riesgo"], "Productos en riesgo": sc["prod_riesgo"],
+        "Monto detenido (+IVA)": sc["monto_detenido"].apply(clp)})
+
+
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
 st.sidebar.caption("Quinta Normal · ICP")
@@ -112,6 +162,20 @@ if pagina == "Inicio":
     ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
           "podrían no llegar a los centros.")
 
+    st.markdown(f"#### 🗓️ Acción inmediata — solo el último mes ({mes_lbl})")
+    st.info("Estas dos tablas consideran **únicamente el último mes**, para gestión inmediata. "
+            "Más abajo encontrarás las mismas tablas para **todo el período** seleccionado.")
+    st.markdown("**🚦 Proveedores a priorizar este mes**")
+    tpm = tabla_prioridad_proveedores(fm)
+    if tpm.empty:
+        st.success("Sin proveedores con suspensión por deuda este mes.")
+    else:
+        st.dataframe(tpm, use_container_width=True, hide_index=True)
+    st.markdown("**🏥 Centros afectados este mes**")
+    st.dataframe(tabla_centros(fm), use_container_width=True, hide_index=True)
+    ayuda("Mismo criterio que las tablas del período (🔴/🟡/🟢), pero acotado al último mes. "
+          "Útil para decidir con quién hablar y qué centro reforzar ahora.")
+
     anio_max = int(f["AÑO"].max())
     st.subheader(f"📉 Medicamentos que más han faltado en {anio_max}")
     fa = f[(f["AÑO"] == anio_max) & (f["ESTADO CENABAST"].isin(riesgo_estados))]
@@ -145,43 +209,8 @@ if pagina == "Inicio":
           "suspendidas por deuda. Mientras más alto, más desabastecido queda ese centro (su "
           "detalle está en la sección 'Puntos de entrega').")
 
-    st.subheader("🚦 Proveedores: prioridad de negociación")
-    bp = f.groupby("NOMBRE PROVEEDOR")
-    sem = bp.agg(monto_iva=("MONTO_IVA", "sum")).reset_index()
-    sem["pct_susp"] = bp["ESTADO CENABAST"].apply(lambda s: (s == "SUSP. X DEUDA").mean() * 100).values
-    fsusp = f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"]
-    med_susp = fsusp.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_susp").reset_index()
-    med_tot = f.groupby("NOMBRE PROVEEDOR")["CODIGO GENERICO"].nunique().rename("med_tot").reset_index()
-    ms = fsusp.groupby("NOMBRE PROVEEDOR")["MONTO_IVA"].sum().rename("monto_susp").reset_index()
-    sem = (sem.merge(med_susp, on="NOMBRE PROVEEDOR", how="left")
-              .merge(med_tot, on="NOMBRE PROVEEDOR", how="left")
-              .merge(ms, on="NOMBRE PROVEEDOR", how="left"))
-    sem[["med_susp", "monto_susp"]] = sem[["med_susp", "monto_susp"]].fillna(0)
-    sem["med_susp"] = sem["med_susp"].astype(int)
-    sem["med_sin"] = (sem["med_tot"] - sem["med_susp"]).astype(int)
-    total_det = sem["monto_susp"].sum()
-    sem["peso_det"] = (sem["monto_susp"] / total_det * 100) if total_det else 0
-
-    def semaforo(p):
-        if p >= 40:
-            return "🔴 Alta"
-        if p >= 15:
-            return "🟡 Media"
-        return "🟢 Baja"
-
-    sem["Prioridad"] = sem["pct_susp"].map(semaforo)
-    sem = sem[sem["monto_susp"] > 0].sort_values("monto_susp", ascending=False).head(15)
-    tab = pd.DataFrame({
-        "Prioridad": sem["Prioridad"],
-        "Proveedor": sem["NOMBRE PROVEEDOR"],
-        "Med. con susp.": sem["med_susp"],
-        "Med. sin susp.": sem["med_sin"],
-        "Monto detenido (+IVA)": sem["monto_susp"].apply(clp),
-        "Peso detenido %": sem["peso_det"].round(1),
-        "% Susp. deuda": sem["pct_susp"].round(0),
-        "Monto total (+IVA)": sem["monto_iva"].apply(clp),
-    })
-    st.dataframe(tab, use_container_width=True, hide_index=True)
+    st.subheader("🚦 Proveedores: prioridad de negociación (período completo)")
+    st.dataframe(tabla_prioridad_proveedores(f), use_container_width=True, hide_index=True)
     ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
           "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
           "proveedores con más dinero retenido, donde conviene enfocar las conversaciones.")
