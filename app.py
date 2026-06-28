@@ -19,7 +19,13 @@ def cargar():
     det = pd.read_excel(DATA, sheet_name="detalle")
     det["FECHA CRUCE"] = pd.to_datetime(det["FECHA CRUCE"])
     det["MONTO_IVA"] = det["VALORIZADO ENTREGADO"] * IVA
+    det["MES_NUM"] = det["FECHA CRUCE"].dt.month
     return det
+
+
+MESES = {1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril", 5: "Mayo", 6: "Junio",
+         7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre",
+         11: "Noviembre", 12: "Diciembre"}
 
 
 det = cargar()
@@ -44,6 +50,10 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("Filtros")
 anios = sorted(det["AÑO"].unique())
 sel_anios = st.sidebar.multiselect("Año", anios, default=anios)
+meses_disp = sorted(det["MES_NUM"].unique())
+sel_meses_nom = st.sidebar.multiselect("Mes", [MESES[m] for m in meses_disp],
+                                        default=[MESES[m] for m in meses_disp])
+sel_meses = [m for m in meses_disp if MESES[m] in sel_meses_nom]
 tipos = sorted(det["TIPO DE PRODUCTO"].unique())
 sel_tipos = st.sidebar.multiselect("Tipo de producto", tipos, default=tipos)
 destinos = sorted(det["NOMBRE DESTINATARIO"].unique())
@@ -51,6 +61,7 @@ sel_dest = st.sidebar.multiselect("Punto de entrega", destinos, default=destinos
 
 f = det[
     det["AÑO"].isin(sel_anios)
+    & det["MES_NUM"].isin(sel_meses)
     & det["TIPO DE PRODUCTO"].isin(sel_tipos)
     & det["NOMBRE DESTINATARIO"].isin(sel_dest)
 ].copy()
