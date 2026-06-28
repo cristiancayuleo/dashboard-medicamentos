@@ -561,6 +561,28 @@ elif pagina == "Negociación inteligente (ML)":
                                 "monto": "Monto (+IVA)"})
     st.dataframe(rest[["Clase", "Productos", "Empresas", "Monto (+IVA)", "% del gasto"]],
                  use_container_width=True, hide_index=True)
+    ayuda("Ojo: en esta tabla una misma empresa puede contarse en varias clases (vende productos "
+          "A, B y C). La tabla siguiente la cuenta una sola vez.")
+
+    st.markdown("**Proveedores por su clase de mayor prioridad (sin doble conteo)**")
+    rank = {"A": 1, "B": 2, "C": 3}
+    inv = {1: "A", 2: "B", 3: "C"}
+    fx_cl["rk"] = fx_cl["Clase"].map(rank)
+    pb = fx_cl.groupby("PROVEEDOR_NEG").agg(rk=("rk", "min"),
+                                            monto=("MONTO_IVA", "sum")).reset_index()
+    pb["Clase proveedor"] = pb["rk"].map(inv)
+    res2 = (pb.groupby("Clase proveedor")
+            .agg(empresas=("PROVEEDOR_NEG", "count"), monto=("monto", "sum"))
+            .reset_index().sort_values("Clase proveedor"))
+    res2["% del gasto"] = (res2["monto"] / res2["monto"].sum() * 100).round(0)
+    res2["monto"] = res2["monto"].apply(clp)
+    st.dataframe(res2.rename(columns={"empresas": "Empresas", "monto": "Monto total (+IVA)"})[
+        ["Clase proveedor", "Empresas", "Monto total (+IVA)", "% del gasto"]],
+        use_container_width=True, hide_index=True)
+    ayuda("Aquí cada proveedor cuenta UNA sola vez, en su clase más alta: si tiene algún producto "
+          "clase A es 'proveedor A' (prioridad), porque al negociar con él se incluyen también "
+          "sus productos B y C. Así ves cuántos proveedores son realmente prioritarios y cuánto "
+          "gasto representan.")
     figp = px.bar(abc.head(20), x="NOMBRE GENERICO CANONICO", y="monto", color="Clase",
                   color_discrete_map={"A": "#d62728", "B": "#ff7f0e", "C": "#2ca02c"},
                   title="Top 20 productos por gasto (Pareto)",
