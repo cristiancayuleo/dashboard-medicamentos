@@ -46,7 +46,7 @@ st.sidebar.title("Distribución de medicamentos")
 st.sidebar.caption("Quinta Normal · ICP")
 pagina = st.sidebar.radio(
     "Sección",
-    ["Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
+    ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
 st.sidebar.markdown("---")
 st.sidebar.subheader("Filtros")
 anios = sorted(det["AÑO"].unique())
@@ -73,8 +73,86 @@ if f.empty:
     st.stop()
 
 
+# ===================== Inicio (resumen ejecutivo) =====================
+if pagina == "Inicio":
+    st.title("Resumen ejecutivo")
+    st.caption("Una mirada rápida al estado del abastecimiento de medicamentos de la comuna: "
+               "qué está en riesgo, qué ha faltado en el año y con qué proveedores conviene "
+               "abrir conversaciones. Para el detalle, usa las secciones de la izquierda.")
+
+    latest = f["FECHA CRUCE"].max()
+    mes_lbl = f"{MESES[latest.month]} {latest.year}"
+    fm = f[f["FECHA CRUCE"] == latest]
+    riesgo_estados = ["FALTANTE", "SUSP. X DEUDA"]
+    riesgo_mes = fm[fm["ESTADO CENABAST"].isin(riesgo_estados)]
+
+    c = st.columns(4)
+    c[0].metric("Monto del período (+IVA)", clp(f["MONTO_IVA"].sum()))
+    c[1].metric("% Aprobado", f"{(f['ESTADO CENABAST']=='APROBADO').mean()*100:.0f}%")
+    c[2].metric("% Susp. x deuda", f"{(f['ESTADO CENABAST']=='SUSP. X DEUDA').mean()*100:.0f}%")
+    c[3].metric(f"Medicamentos en riesgo · {mes_lbl}", riesgo_mes["CODIGO GENERICO"].nunique())
+
+    st.divider()
+    st.subheader(f"🚨 Medicamentos en riesgo de no llegar — {mes_lbl}")
+    if riesgo_mes.empty:
+        st.success("Sin medicamentos en riesgo para el último mes con los filtros actuales.")
+    else:
+        r = (riesgo_mes.groupby(["NOMBRE GENERICO CANONICO", "ESTADO CENABAST", "NOMBRE PROVEEDOR"])
+             ["MONTO_IVA"].sum().reset_index().sort_values("MONTO_IVA", ascending=False)
+             .rename(columns={"NOMBRE GENERICO CANONICO": "Medicamento", "ESTADO CENABAST": "Estado",
+                              "NOMBRE PROVEEDOR": "Proveedor", "MONTO_IVA": "Monto (+IVA)"}))
+        st.dataframe(r, use_container_width=True, hide_index=True, height=280)
+    ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
+          "podrían no llegar a los centros.")
+
+    anio_max = int(f["AÑO"].max())
+    st.subheader(f"📉 Medicamentos que más han faltado en {anio_max}")
+    fa = f[(f["AÑO"] == anio_max) & (f["ESTADO CENABAST"].isin(riesgo_estados))]
+    if fa.empty:
+        st.success(f"Sin faltas registradas en {anio_max} con los filtros actuales.")
+    else:
+        rec = (fa.groupby("NOMBRE GENERICO CANONICO")["MES_NUM"].nunique()
+               .rename("Meses con falta").reset_index()
+               .rename(columns={"NOMBRE GENERICO CANONICO": "Medicamento"})
+               .sort_values("Meses con falta", ascending=False).head(12))
+        st.plotly_chart(
+            px.bar(rec.sort_values("Meses con falta"), x="Meses con falta", y="Medicamento",
+                   orientation="h", color_discrete_sequence=COL,
+                   title=f"Top 12 medicamentos con más meses de falta en {anio_max}"),
+            use_container_width=True)
+    ayuda("Cuántos meses del año cada medicamento estuvo faltante o suspendido. Mientras más "
+          "meses, más recurrente es el problema de abastecimiento.")
+
+    st.subheader("🚦 Proveedores: prioridad de negociación")
+    bp = f.groupby("NOMBRE PROVEEDOR")
+    sem = bp.agg(monto_iva=("MONTO_IVA", "sum")).reset_index()
+    sem["pct_susp"] = bp["ESTADO CENABAST"].apply(lambda s: (s == "SUSP. X DEUDA").mean() * 100).values
+    ms = (f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"].groupby("NOMBRE PROVEEDOR")["MONTO_IVA"]
+          .sum().rename("monto_susp").reset_index())
+    sem = sem.merge(ms, on="NOMBRE PROVEEDOR", how="left")
+    sem["monto_susp"] = sem["monto_susp"].fillna(0)
+
+    def semaforo(p):
+        if p >= 40:
+            return "🔴 Alta"
+        if p >= 15:
+            return "🟡 Media"
+        return "🟢 Baja"
+
+    sem["Prioridad"] = sem["pct_susp"].map(semaforo)
+    sem = sem[sem["monto_susp"] > 0].sort_values("monto_susp", ascending=False).head(15)
+    tab = sem.rename(columns={"NOMBRE PROVEEDOR": "Proveedor", "monto_susp": "Monto detenido (+IVA)",
+                              "pct_susp": "% Susp. deuda", "monto_iva": "Monto total (+IVA)"})
+    tab["% Susp. deuda"] = tab["% Susp. deuda"].round(0)
+    st.dataframe(tab[["Prioridad", "Proveedor", "Monto detenido (+IVA)", "% Susp. deuda",
+                      "Monto total (+IVA)"]], use_container_width=True, hide_index=True)
+    ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
+          "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
+          "proveedores con más dinero retenido, donde conviene enfocar las conversaciones.")
+
+
 # ===================== Panorama general =====================
-if pagina == "Panorama general":
+elif pagina == "Panorama general":
     st.title("Panorama general de la distribución")
     st.caption("Visión global de lo que se distribuye a la red de salud comunal. "
                "Usa los filtros de la izquierda para acotar por año, mes, tipo o punto de entrega.")
