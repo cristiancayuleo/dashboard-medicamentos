@@ -96,7 +96,7 @@ st.sidebar.title("Distribución de medicamentos")
 st.sidebar.caption("Quinta Normal · ICP")
 pagina = st.sidebar.radio(
     "Sección",
-    ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
+    ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Negociación inteligente (ML)"])
 st.sidebar.markdown("---")
 st.sidebar.subheader("Filtros")
 anios = sorted(det["AÑO"].unique())
@@ -228,7 +228,7 @@ elif pagina == "Panorama general":
             "- **Puntos de entrega:** qué y cuánto llega a cada centro de la comuna.\n"
             "- **Proveedores:** en quién concentrar la gestión (peso y deuda).\n"
             "- **Productos:** qué se pide, con qué frecuencia y su evolución entre años.\n"
-            "- **Segmentación (ML):** agrupa proveedores con comportamiento parecido.\n\n"
+            "- **Negociación inteligente (ML):** clasificación ABC, grupos de proveedores y simulador de ahorro.\n\n"
             "Cada gráfico tiene una nota **ℹ️** que explica cómo leerlo. Los **filtros** de la "
             "izquierda se aplican a todas las secciones.")
 
@@ -512,97 +512,123 @@ elif pagina == "Productos":
     st.dataframe(det_tab, use_container_width=True, height=360, hide_index=True)
 
 
-# ===================== Segmentación (ML) =====================
-elif pagina == "Segmentación (ML)":
-    st.title("Segmentación de proveedores (Machine Learning)")
-    st.caption("Un modelo agrupa automáticamente a los proveedores con comportamiento parecido "
-               "(monto, unidades, variedad y % suspendido por deuda), revelando perfiles para "
-               "tratar a cada grupo de forma distinta.")
+# ===================== Negociación inteligente (ML + ABC) =====================
+elif pagina == "Negociación inteligente (ML)":
+    st.title("Negociación inteligente: ABC + Machine Learning")
+    st.caption("Prioriza dónde negociar combinando tres miradas: clasificación ABC (qué productos "
+               "concentran el gasto), segmentación de proveedores con un modelo de ML, y un "
+               "simulador de ahorro por negociación.")
 
-    base = f.groupby(["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"])
-    prov = base.agg(
-        monto_iva=("MONTO_IVA", "sum"),
-        unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
-        n_productos=("CODIGO GENERICO", "nunique")).reset_index()
-    prov["pct_susp"] = base["ESTADO CENABAST"].apply(
-        lambda s: (s == "SUSP. X DEUDA").mean()).values
+    HOLDINGS = {"OPKO CHILE S.A.": "OPKO–ARAMA (holding)",
+                "ARAMA NATURAL PRODUCTS DISTRIBUIDOR": "OPKO–ARAMA (holding)"}
+    consolidar = st.checkbox(
+        "Consolidar holdings (tratar OPKO y ARAMA como un solo proveedor para negociar)", value=True)
+    fx = f.copy()
+    fx["PROVEEDOR_NEG"] = (fx["NOMBRE PROVEEDOR"].map(lambda x: HOLDINGS.get(x, x))
+                           if consolidar else fx["NOMBRE PROVEEDOR"])
 
-    if len(prov) < 6:
-        st.warning("Muy pocos proveedores con los filtros actuales para segmentar.")
-        st.stop()
+    # ---------- 1) Clasificación ABC ----------
+    st.subheader("1️⃣ Clasificación ABC de productos (costeo ABC)")
+    abc = (fx.groupby("NOMBRE GENERICO CANONICO")
+           .agg(monto=("MONTO_IVA", "sum"), unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"))
+           .sort_values("monto", ascending=False).reset_index())
+    abc["acum_%"] = abc["monto"].cumsum() / abc["monto"].sum() * 100
+    abc["Clase"] = abc["acum_%"].map(lambda a: "A" if a <= 80 else ("B" if a <= 95 else "C"))
+    res = abc.groupby("Clase").agg(productos=("NOMBRE GENERICO CANONICO", "count"),
+                                   monto=("monto", "sum")).reset_index()
+    res["% del gasto"] = (res["monto"] / res["monto"].sum() * 100).round(0)
+    cc = st.columns(3)
+    for i, cls in enumerate(["A", "B", "C"]):
+        row = res[res["Clase"] == cls]
+        if not row.empty:
+            cc[i].metric(f"Clase {cls}", f"{int(row['productos'].iloc[0])} productos",
+                         f"{row['% del gasto'].iloc[0]:.0f}% del gasto")
+    rest = res.copy()
+    rest["monto"] = rest["monto"].apply(clp)
+    st.dataframe(rest.rename(columns={"productos": "Productos", "monto": "Monto (+IVA)"}),
+                 use_container_width=True, hide_index=True)
+    figp = px.bar(abc.head(20), x="NOMBRE GENERICO CANONICO", y="monto", color="Clase",
+                  color_discrete_map={"A": "#d62728", "B": "#ff7f0e", "C": "#2ca02c"},
+                  title="Top 20 productos por gasto (Pareto)",
+                  labels={"monto": "Monto (+IVA)", "NOMBRE GENERICO CANONICO": "Producto"})
+    figp.update_xaxes(showticklabels=False)
+    st.plotly_chart(figp, use_container_width=True)
+    ayuda("La clase A son los pocos productos que concentran ~80% del gasto: ahí cada peso "
+          "negociado rinde más. En productos básicos de alto volumen, una rebaja pequeña por "
+          "unidad genera grandes ahorros (ver simulador abajo).")
 
-    X = prov[["monto_iva", "unidades", "n_productos", "pct_susp"]].copy()
-    X["monto_iva"] = np.log1p(X["monto_iva"])
-    X["unidades"] = np.log1p(X["unidades"])
-    Xs = StandardScaler().fit_transform(X)
+    # ---------- 2) Segmentación de proveedores (K-Means) ----------
+    st.subheader("2️⃣ Segmentación de proveedores (modelo de ML · K-Means)")
+    st.caption("El modelo agrupa proveedores con comportamiento parecido (no predice: descubre "
+               "patrones). Cada grupo se gestiona de forma distinta.")
+    base = fx.groupby("PROVEEDOR_NEG")
+    prov = base.agg(monto_iva=("MONTO_IVA", "sum"),
+                    unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"),
+                    n_productos=("CODIGO GENERICO", "nunique")).reset_index()
+    prov["pct_susp"] = base["ESTADO CENABAST"].apply(lambda s: (s == "SUSP. X DEUDA").mean()).values
 
-    kmax = min(8, len(prov) - 1)
-    sils = {}
-    for kk in range(2, kmax + 1):
-        lab = KMeans(n_clusters=kk, n_init=10, random_state=42).fit_predict(Xs)
-        sils[kk] = silhouette_score(Xs, lab)
-    k_sug = max(sils, key=sils.get)
+    if len(prov) >= 6:
+        X = prov[["monto_iva", "unidades", "n_productos", "pct_susp"]].copy()
+        X["monto_iva"] = np.log1p(X["monto_iva"])
+        X["unidades"] = np.log1p(X["unidades"])
+        Xs = StandardScaler().fit_transform(X)
+        kmax = min(8, len(prov) - 1)
+        sils = {kk: silhouette_score(Xs, KMeans(n_clusters=kk, n_init=10, random_state=42).fit_predict(Xs))
+                for kk in range(2, kmax + 1)}
+        k_sug = max(sils, key=sils.get)
+        k = st.slider("Número de grupos", 2, kmax, k_sug)
+        km = KMeans(n_clusters=k, n_init=10, random_state=42).fit(Xs)
+        prov["cluster"] = km.labels_
+        perfil = prov.groupby("cluster").agg(monto_iva=("monto_iva", "mean"),
+                                             pct_susp=("pct_susp", "mean"),
+                                             n_productos=("n_productos", "mean"))
 
-    c1, c2 = st.columns([2, 1])
-    k = c1.slider("Número de grupos", 2, kmax, k_sug)
-    c2.metric("Sugerencia del modelo", f"{k_sug} grupos")
-    ayuda("El modelo sugiere el número de grupos que mejor separa a los proveedores. Puedes "
-          "moverlo para explorar más o menos grupos.")
+        def nombrar(perfil):
+            nom, vmed = {}, perfil["monto_iva"].median()
+            for c, r in perfil.iterrows():
+                if r["n_productos"] >= perfil["n_productos"].max() and r["n_productos"] > 100:
+                    t = "Distribuidor amplio"
+                elif r["monto_iva"] >= vmed and r["pct_susp"] >= 0.30:
+                    t = "Grande con alta deuda"
+                elif r["monto_iva"] >= vmed:
+                    t = "Grande (alto monto)"
+                elif r["pct_susp"] >= 0.30:
+                    t = "Con deuda relevante"
+                else:
+                    t = "Menor / bajo volumen"
+                nom[c] = f"G{c}: {t}"
+            return nom
 
-    km = KMeans(n_clusters=k, n_init=10, random_state=42).fit(Xs)
-    prov["cluster"] = km.labels_
-    perfil = prov.groupby("cluster").agg(
-        monto_iva=("monto_iva", "mean"), unidades=("unidades", "mean"),
-        n_productos=("n_productos", "mean"), pct_susp=("pct_susp", "mean"))
-
-    def nombrar(perfil):
-        nom, vmed = {}, perfil["monto_iva"].median()
-        for c, r in perfil.iterrows():
-            if r["n_productos"] >= perfil["n_productos"].max() and r["n_productos"] > 100:
-                t = "Distribuidor amplio (gran canasta)"
-            elif r["monto_iva"] >= vmed and r["pct_susp"] >= 0.30:
-                t = "Grande con alta deuda"
-            elif r["monto_iva"] >= vmed:
-                t = "Grande (alto monto)"
-            elif r["pct_susp"] >= 0.30:
-                t = "Con deuda relevante"
-            else:
-                t = "Menor / bajo volumen"
-            nom[c] = f"G{c}: {t}"
-        return nom
-
-    nombres = nombrar(perfil)
-    prov["Perfil"] = prov["cluster"].map(nombres)
-
-    st.plotly_chart(
-        px.scatter(prov, x="monto_iva", y="pct_susp", size="n_productos", color="Perfil",
-                   color_discrete_sequence=COL, hover_name="NOMBRE PROVEEDOR",
-                   title="Grupos de proveedores",
-                   labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"}),
-        use_container_width=True)
-    ayuda("Cómo leerlo: cada color es un perfil de proveedor. Los grupos de alto monto con "
-          "alta suspensión por deuda son los que más conviene atender de cerca.")
-
-    st.subheader("Perfil de cada grupo (promedios)")
-    tp = perfil.copy()
-    tp.index = tp.index.map(nombres)
-    tp["pct_susp"] = (tp["pct_susp"] * 100).round(0)
-    tp = tp.round(0)
-    tp.insert(0, "n_proveedores", prov.groupby("cluster").size().rename(index=nombres))
-    tp = tp.rename(columns={"monto_iva": "Monto prom (+IVA)", "unidades": "Unid. prom",
-                            "n_productos": "Canasta prom", "pct_susp": "% Susp. deuda"})
-    st.dataframe(tp, use_container_width=True)
-
-    with st.expander("¿Cómo se eligió el número de grupos? (silhouette)"):
-        sdf = pd.DataFrame({"k": list(sils), "silhouette": [round(v, 3) for v in sils.values()]})
+        nombres = nombrar(perfil)
+        prov["Perfil"] = prov["cluster"].map(nombres)
         st.plotly_chart(
-            px.line(sdf, x="k", y="silhouette", markers=True,
-                    title="Calidad de separación por número de grupos (más alto = mejor)"),
+            px.scatter(prov, x="monto_iva", y="pct_susp", size="n_productos", color="Perfil",
+                       color_discrete_sequence=COL, hover_name="PROVEEDOR_NEG",
+                       title="Grupos de proveedores",
+                       labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"}),
             use_container_width=True)
+        ayuda("Cada color es un perfil. Los grupos de alto monto con alta suspensión por deuda son "
+              "los que más conviene atender (ej.: el holding OPKO–ARAMA si está consolidado).")
+    else:
+        st.info("Muy pocos proveedores con los filtros actuales para segmentar.")
 
-    st.subheader("Proveedores con su grupo asignado")
-    out = prov.sort_values(["cluster", "monto_iva"], ascending=[True, False])[
-        ["NOMBRE PROVEEDOR", "GRUPO", "Perfil", "monto_iva", "unidades", "n_productos", "pct_susp"]]
-    st.dataframe(out, use_container_width=True, height=360, hide_index=True)
-    st.download_button("Descargar grupos (CSV)", out.to_csv(index=False).encode("utf-8"),
-                       "proveedores_segmentados.csv", "text/csv")
+    # ---------- 3) Simulador de ahorro ----------
+    st.subheader("3️⃣ Simulador de ahorro por negociación")
+    st.caption("En productos básicos de alto volumen, una rebaja pequeña por unidad se multiplica. "
+               "Simula cuánto se podría ahorrar y cuánta deuda cubriría.")
+    prov_sel = st.selectbox("Proveedor / holding a negociar", sorted(fx["PROVEEDOR_NEG"].unique()))
+    fps = fx[fx["PROVEEDOR_NEG"] == prov_sel]
+    unidades = int(fps["CANTIDAD UNITARIA A DESPACHAR"].sum())
+    detenido = fps[fps["ESTADO CENABAST"] == "SUSP. X DEUDA"]["MONTO_IVA"].sum()
+    ahorro_u = st.slider("Ahorro negociado por unidad ($)", 0, 50, 5)
+    ahorro_total = unidades * ahorro_u
+    s = st.columns(3)
+    s[0].metric("Unidades del proveedor", miles(unidades))
+    s[1].metric("Ahorro por unidad", clp(ahorro_u))
+    s[2].metric("Ahorro potencial total", clp(ahorro_total))
+    if detenido > 0:
+        cob = ahorro_total / detenido * 100
+        st.markdown(f"Ese ahorro cubriría el **{cob:.0f}%** del monto hoy detenido por deuda con "
+                    f"este proveedor ({clp(detenido)}).")
+    ayuda("Ejemplo: si el proveedor entrega 2.000.000 de unidades y negocias $30 menos por unidad, "
+          "el ahorro es $60.000.000 — recursos que pueden destinarse a reducir deuda.")
