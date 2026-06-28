@@ -43,7 +43,7 @@ def ayuda(texto):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("Quinta Normal · ICP")
+st.sidebar.caption("By Cristian Cayuleo")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Segmentación (ML)"])
