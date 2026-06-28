@@ -253,7 +253,7 @@ elif pagina == "Panorama general":
     a.caption("ℹ️ Cómo leerlo: la evolución del gasto mensual. Sirve para ver estacionalidad "
               "y meses atípicos (ej. caídas en enero).")
     est = f["ESTADO CENABAST"].value_counts().reset_index()
-    est.columns = ["Estado", "Líneas"]
+    est.columns = ["Estado", "Cantidad Productos"]
     b.plotly_chart(
         px.bar(est, x="Estado", y="Cantidad Productos", color="Estado", color_discrete_sequence=COL,
                title="Estado de las solicitudes (filtrar en caso de querer algún año y/o mes en particular)"),
