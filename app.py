@@ -123,6 +123,21 @@ if pagina == "Inicio":
     ayuda("Cuántos meses del año cada medicamento estuvo faltante o suspendido. Mientras más "
           "meses, más recurrente es el problema de abastecimiento.")
 
+    st.subheader("🏥 Centros más afectados por la falta")
+    cen = f.groupby("NOMBRE DESTINATARIO").agg(lineas=("ESTADO CENABAST", "size")).reset_index()
+    cen["en_riesgo"] = f.groupby("NOMBRE DESTINATARIO")["ESTADO CENABAST"].apply(
+        lambda s: s.isin(riesgo_estados).sum()).values
+    cen["pct_riesgo"] = (cen["en_riesgo"] / cen["lineas"] * 100).round(0)
+    st.plotly_chart(
+        px.bar(cen.sort_values("pct_riesgo"), x="pct_riesgo", y="NOMBRE DESTINATARIO",
+               orientation="h", color="NOMBRE DESTINATARIO", color_discrete_sequence=COL,
+               title="% de solicitudes en riesgo por centro",
+               labels={"pct_riesgo": "% en riesgo", "NOMBRE DESTINATARIO": ""}),
+        use_container_width=True)
+    ayuda("Qué centro sufre más la falta: el % de sus solicitudes que quedan faltantes o "
+          "suspendidas por deuda. Mientras más alto, más desabastecido queda ese centro (su "
+          "detalle está en la sección 'Puntos de entrega').")
+
     st.subheader("🚦 Proveedores: prioridad de negociación")
     bp = f.groupby("NOMBRE PROVEEDOR")
     sem = bp.agg(monto_iva=("MONTO_IVA", "sum")).reset_index()
@@ -251,6 +266,38 @@ elif pagina == "Puntos de entrega":
                  use_container_width=True, hide_index=True)
     ayuda("Compara puntos de un vistazo: monto, variedad y qué tan aprobado/suspendido está "
           "cada uno.")
+
+    st.subheader("🚦 Confiabilidad por centro")
+    riesgo_estados = ["FALTANTE", "SUSP. X DEUDA"]
+    sc = f.groupby("NOMBRE DESTINATARIO").agg(lineas=("ESTADO CENABAST", "size")).reset_index()
+    sc["en_riesgo"] = f.groupby("NOMBRE DESTINATARIO")["ESTADO CENABAST"].apply(
+        lambda s: s.isin(riesgo_estados).sum()).values
+    sc["pct_riesgo"] = (sc["en_riesgo"] / sc["lineas"] * 100).round(0)
+    pr = (f[f["ESTADO CENABAST"].isin(riesgo_estados)].groupby("NOMBRE DESTINATARIO")
+          ["CODIGO GENERICO"].nunique().rename("prod_riesgo").reset_index())
+    md = (f[f["ESTADO CENABAST"].isin(riesgo_estados)].groupby("NOMBRE DESTINATARIO")
+          ["MONTO_IVA"].sum().rename("monto_detenido").reset_index())
+    sc = sc.merge(pr, on="NOMBRE DESTINATARIO", how="left").merge(md, on="NOMBRE DESTINATARIO", how="left")
+    sc["prod_riesgo"] = sc["prod_riesgo"].fillna(0).astype(int)
+    sc["monto_detenido"] = sc["monto_detenido"].fillna(0)
+
+    def sem_c(p):
+        if p >= 35:
+            return "🔴 Crítico"
+        if p >= 25:
+            return "🟡 Medio"
+        return "🟢 Estable"
+
+    sc["Estado"] = sc["pct_riesgo"].map(sem_c)
+    sc["monto_detenido"] = sc["monto_detenido"].apply(clp)
+    tc = sc.sort_values("pct_riesgo", ascending=False).rename(columns={
+        "NOMBRE DESTINATARIO": "Centro", "pct_riesgo": "% en riesgo",
+        "prod_riesgo": "Productos en riesgo", "monto_detenido": "Monto detenido (+IVA)"})
+    st.dataframe(tc[["Estado", "Centro", "% en riesgo", "Productos en riesgo",
+                     "Monto detenido (+IVA)"]], use_container_width=True, hide_index=True)
+    ayuda("Semáforo por centro según el % de solicitudes faltantes o suspendidas por deuda: "
+          "🔴 crítico (≥35%), 🟡 medio (25–35%), 🟢 estable (<25%). Muestra qué centros quedan "
+          "más desabastecidos y cuánto dinero en productos no les llega.")
 
     st.subheader("¿Qué se entrega en cada punto?")
     punto = st.selectbox("Elige un punto de entrega", destinos)
