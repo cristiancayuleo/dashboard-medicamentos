@@ -545,6 +545,10 @@ elif pagina == "Negociación inteligente (ML)":
     res = abc.groupby("Clase").agg(productos=("NOMBRE GENERICO CANONICO", "count"),
                                    monto=("monto", "sum")).reset_index()
     res["% del gasto"] = (res["monto"] / res["monto"].sum() * 100).round(0)
+    clase_map = abc.set_index("NOMBRE GENERICO CANONICO")["Clase"]
+    fx_cl = fx.assign(Clase=fx["NOMBRE GENERICO CANONICO"].map(clase_map))
+    emp = fx_cl.groupby("Clase")["PROVEEDOR_NEG"].nunique().rename("empresas").reset_index()
+    res = res.merge(emp, on="Clase", how="left")
     cc = st.columns(3)
     for i, cls in enumerate(["A", "B", "C"]):
         row = res[res["Clase"] == cls]
@@ -553,7 +557,9 @@ elif pagina == "Negociación inteligente (ML)":
                          f"{row['% del gasto'].iloc[0]:.0f}% del gasto")
     rest = res.copy()
     rest["monto"] = rest["monto"].apply(clp)
-    st.dataframe(rest.rename(columns={"productos": "Productos", "monto": "Monto (+IVA)"}),
+    rest = rest.rename(columns={"productos": "Productos", "empresas": "Empresas",
+                                "monto": "Monto (+IVA)"})
+    st.dataframe(rest[["Clase", "Productos", "Empresas", "Monto (+IVA)", "% del gasto"]],
                  use_container_width=True, hide_index=True)
     figp = px.bar(abc.head(20), x="NOMBRE GENERICO CANONICO", y="monto", color="Clase",
                   color_discrete_map={"A": "#d62728", "B": "#ff7f0e", "C": "#2ca02c"},
