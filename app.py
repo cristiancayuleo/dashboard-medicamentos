@@ -727,6 +727,22 @@ elif pagina == "Negociación inteligente (ML)":
         st.dataframe(tp, use_container_width=True, hide_index=True)
         ayuda("Lee cada fila como un 'tipo' de proveedor: cuántos hay, cuánto mueven, qué % de "
               "deuda, qué tan amplia es su canasta y qué conviene hacer con cada grupo.")
+
+        with st.expander("ℹ️ ¿Qué significa cada grupo (G0, G1, …)?"):
+            st.markdown(
+                "Cada grupo reúne proveedores con comportamiento parecido. La etiqueta resume su "
+                "**nivel de monto** (cuánto dinero mueven) y su **nivel de deuda** (% de solicitudes "
+                "suspendidas por deuda). Con los grupos actuales:")
+            lineas = []
+            for c in idx:
+                etiqueta = nombres[c].split(": ", 1)[1]
+                n = int((prov["cluster"] == c).sum())
+                lineas.append(
+                    f"- **G{c} — {etiqueta}:** {n} proveedores; en promedio mueven "
+                    f"{clp(perfil.loc[c, 'monto_iva'])}, con "
+                    f"{round(perfil.loc[c, 'pct_susp'] * 100)}% suspendido por deuda y una canasta "
+                    f"de {round(perfil.loc[c, 'n_productos'])} productos. → *{acciones[c]}*")
+            st.markdown("\n".join(lineas))
     else:
         st.info("Muy pocos proveedores con los filtros actuales para segmentar.")
 
