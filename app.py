@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-st.set_page_config(page_title="Distribución de Medicamentos · Cenabast Comunal",
+st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
                    page_icon="💊", layout="wide")
 
 DATA = "datos_preparados.xlsx"
@@ -93,7 +93,7 @@ def tabla_centros(df):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("Cenabast Comunal")
+st.sidebar.caption("Quinta Normal · ICP")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Negociación inteligente (ML)"])
@@ -150,7 +150,7 @@ if pagina == "Inicio":
     d[3].metric("Unidades afectadas", miles(riesgo_mes["CANTIDAD UNITARIA A DESPACHAR"].sum()))
 
     st.divider()
-    st.subheader(f"🚨 Medicamentos con suspensión por deuda Cenabast — {mes_lbl}")
+    st.subheader(f"🚨 Medicamentos en riesgo de no llegar — {mes_lbl}")
     if riesgo_mes.empty:
         st.success("Sin medicamentos en riesgo para el último mes con los filtros actuales.")
     else:
@@ -163,7 +163,7 @@ if pagina == "Inicio":
     ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
           "podrían no llegar a los centros.")
 
-    st.markdown(f"#### 🗓️ Acción inmediata — mes ({mes_lbl})")
+    st.markdown(f"#### 🗓️ Acción inmediata — solo el último mes ({mes_lbl})")
     st.info("Estas dos tablas consideran **únicamente el último mes**, para gestión inmediata. "
             "Más abajo encontrarás las mismas tablas para **todo el período** seleccionado.")
     st.markdown("**🚦 Proveedores a priorizar este mes**")
@@ -210,7 +210,7 @@ if pagina == "Inicio":
           "suspendidas por deuda. Mientras más alto, más desabastecido queda ese centro (su "
           "detalle está en la sección 'Puntos de entrega').")
 
-    st.subheader("🚦 Proveedores: prioridad de negociación (filtrar en caso de querer algún año y/o mes en particular)")
+    st.subheader("🚦 Proveedores: prioridad de negociación (período completo)")
     st.dataframe(tabla_prioridad_proveedores(f), use_container_width=True, hide_index=True)
     ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
           "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
@@ -253,10 +253,10 @@ elif pagina == "Panorama general":
     a.caption("ℹ️ Cómo leerlo: la evolución del gasto mensual. Sirve para ver estacionalidad "
               "y meses atípicos (ej. caídas en enero).")
     est = f["ESTADO CENABAST"].value_counts().reset_index()
-    est.columns = ["Estado", "Cantidad Productos"]
+    est.columns = ["Estado", "Líneas"]
     b.plotly_chart(
-        px.bar(est, x="Estado", y="Cantidad Productos", color="Estado", color_discrete_sequence=COL,
-               title="Estado de las solicitudes (filtrar en caso de querer algún año y/o mes en particular)"),
+        px.bar(est, x="Estado", y="Líneas", color="Estado", color_discrete_sequence=COL,
+               title="Estado de las solicitudes"),
         use_container_width=True)
     b.caption("ℹ️ Cómo leerlo: cuántas solicitudes hay en cada estado. 'Aprobado' y "
               "'Susp. x deuda' son las que dependen de la gestión interna.")
@@ -271,7 +271,7 @@ elif pagina == "Panorama general":
                 color_discrete_sequence=COL, labels={"FECHA CRUCE": "Mes"}),
         use_container_width=True)
     ayuda("Cómo usarlo: si la línea de suspendido por deuda sube, el abastecimiento se vuelve "
-          "menos confiable ese mes. Picos indican meses que requieren atención de gestión. PD: Este gráfico deja fuera a los productos Suspendidos , Faltantes, Eliminados y Pendientes, puesto que, dichos estados son exclusivamente potestad de Cenabast")
+          "menos confiable ese mes. Picos indican meses que requieren atención de gestión.")
 
 
 # ===================== Puntos de entrega =====================
@@ -663,23 +663,40 @@ elif pagina == "Negociación inteligente (ML)":
                                              pct_susp=("pct_susp", "mean"),
                                              n_productos=("n_productos", "mean"))
 
-        def nombrar(perfil):
-            nom, vmed = {}, perfil["monto_iva"].median()
+        def clasificar(perfil):
+            montos = perfil["monto_iva"]
+            q1, q2 = montos.quantile(1 / 3), montos.quantile(2 / 3)
+            cmax = perfil["n_productos"].max()
+            nombres, acciones = {}, {}
             for c, r in perfil.iterrows():
-                if r["n_productos"] >= perfil["n_productos"].max() and r["n_productos"] > 100:
-                    t = "Distribuidor amplio"
-                elif r["monto_iva"] >= vmed and r["pct_susp"] >= 0.30:
-                    t = "Grande con alta deuda"
-                elif r["monto_iva"] >= vmed:
-                    t = "Grande (alto monto)"
-                elif r["pct_susp"] >= 0.30:
-                    t = "Con deuda relevante"
+                amplia = r["n_productos"] >= cmax and r["n_productos"] > 40
+                tier = ("Alto monto" if r["monto_iva"] >= q2
+                        else ("Monto medio" if r["monto_iva"] >= q1 else "Bajo monto"))
+                deuda = ("alta deuda" if r["pct_susp"] >= 0.40
+                         else ("deuda media" if r["pct_susp"] >= 0.15 else "baja deuda"))
+                etiqueta = "Distribuidor de canasta amplia" if amplia else f"{tier} · {deuda}"
+                nombres[c] = f"G{c}: {etiqueta}"
+                if r["pct_susp"] >= 0.40 and r["monto_iva"] >= q1:
+                    acciones[c] = "Negociar deuda — prioridad alta"
+                elif r["pct_susp"] >= 0.40:
+                    acciones[c] = "Negociar deuda"
+                elif amplia:
+                    acciones[c] = "Proveedor clave: cuidar la relación"
+                elif r["monto_iva"] >= q2:
+                    acciones[c] = "Negociar precio (alto volumen)"
+                elif r["pct_susp"] >= 0.15:
+                    acciones[c] = "Vigilar deuda"
                 else:
-                    t = "Menor / bajo volumen"
-                nom[c] = f"G{c}: {t}"
-            return nom
+                    acciones[c] = "Seguimiento liviano"
+            from collections import Counter
+            base = {c: nombres[c].split(": ", 1)[1] for c in nombres}
+            rep = Counter(base.values())
+            for c in nombres:
+                if rep[base[c]] > 1:
+                    nombres[c] = f"G{c}: {base[c]} (canasta {round(perfil.loc[c, 'n_productos'])})"
+            return nombres, acciones
 
-        nombres = nombrar(perfil)
+        nombres, acciones = clasificar(perfil)
         prov["Perfil"] = prov["cluster"].map(nombres)
         st.plotly_chart(
             px.scatter(prov, x="monto_iva", y="pct_susp", size="n_productos", color="Perfil",
@@ -687,21 +704,23 @@ elif pagina == "Negociación inteligente (ML)":
                        title="Grupos de proveedores",
                        labels={"monto_iva": "Monto (+IVA)", "pct_susp": "% Susp. x deuda"}),
             use_container_width=True)
-        ayuda("Cada color es un perfil. Los grupos de alto monto con alta suspensión por deuda son "
-              "los que más conviene atender (ej.: el holding OPKO–ARAMA si está consolidado).")
+        ayuda("Cada color es un perfil. La etiqueta combina el nivel de monto (alto/medio/bajo) "
+              "con el de deuda. Los grupos de alto monto con alta deuda son los que más conviene "
+              "atender (ej.: el holding OPKO–ARAMA si está consolidado).")
 
-        st.markdown("**Perfil de cada grupo (promedios)** — qué representa cada color")
-        tp = perfil.copy()
-        tp.index = tp.index.map(nombres)
+        st.markdown("**Perfil de cada grupo (promedios)** — qué representa cada color y qué hacer")
+        idx = list(perfil.index)
         tp = pd.DataFrame({
-            "Proveedores": prov.groupby("cluster").size().rename(index=nombres),
-            "Monto prom. (+IVA)": tp["monto_iva"].apply(clp),
-            "% Susp. deuda prom.": (tp["pct_susp"] * 100).round(0),
-            "Canasta prom.": tp["n_productos"].round(0),
+            "Grupo": [nombres[c] for c in idx],
+            "Proveedores": [int((prov["cluster"] == c).sum()) for c in idx],
+            "Monto prom. (+IVA)": [clp(perfil.loc[c, "monto_iva"]) for c in idx],
+            "% Susp. deuda prom.": [round(perfil.loc[c, "pct_susp"] * 100) for c in idx],
+            "Canasta prom.": [round(perfil.loc[c, "n_productos"]) for c in idx],
+            "Acción sugerida": [acciones[c] for c in idx],
         })
-        st.dataframe(tp, use_container_width=True)
-        ayuda("Lee cada fila como un 'tipo' de proveedor: cuántos hay, cuánto mueven en promedio, "
-              "qué % de deuda y qué tan amplia es su canasta. Así sabes qué hacer con cada grupo.")
+        st.dataframe(tp, use_container_width=True, hide_index=True)
+        ayuda("Lee cada fila como un 'tipo' de proveedor: cuántos hay, cuánto mueven, qué % de "
+              "deuda, qué tan amplia es su canasta y qué conviene hacer con cada grupo.")
     else:
         st.info("Muy pocos proveedores con los filtros actuales para segmentar.")
 
