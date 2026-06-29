@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
-st.set_page_config(page_title="Distribución de Medicamentos · Quinta Normal",
+st.set_page_config(page_title="Distribución de Medicamentos · Cenabast Comunal",
                    page_icon="💊", layout="wide")
 
 DATA = "datos_preparados.xlsx"
@@ -93,7 +93,7 @@ def tabla_centros(df):
 
 # ===================== Barra lateral =====================
 st.sidebar.title("Distribución de medicamentos")
-st.sidebar.caption("Quinta Normal · ICP")
+st.sidebar.caption("Cenabast Comunal")
 pagina = st.sidebar.radio(
     "Sección",
     ["Inicio", "Panorama general", "Puntos de entrega", "Proveedores", "Productos", "Negociación inteligente (ML)"])
@@ -150,7 +150,7 @@ if pagina == "Inicio":
     d[3].metric("Unidades afectadas", miles(riesgo_mes["CANTIDAD UNITARIA A DESPACHAR"].sum()))
 
     st.divider()
-    st.subheader(f"🚨 Medicamentos en riesgo de no llegar — {mes_lbl}")
+    st.subheader(f"🚨 Medicamentos con suspensión por deuda Cenabast — {mes_lbl}")
     if riesgo_mes.empty:
         st.success("Sin medicamentos en riesgo para el último mes con los filtros actuales.")
     else:
@@ -163,7 +163,7 @@ if pagina == "Inicio":
     ayuda("Productos que este mes figuran como faltantes o suspendidos por deuda: los que "
           "podrían no llegar a los centros.")
 
-    st.markdown(f"#### 🗓️ Acción inmediata — solo el último mes ({mes_lbl})")
+    st.markdown(f"#### 🗓️ Acción inmediata para este mes de ({mes_lbl})")
     st.info("Estas dos tablas consideran **únicamente el último mes**, para gestión inmediata. "
             "Más abajo encontrarás las mismas tablas para **todo el período** seleccionado.")
     st.markdown("**🚦 Proveedores a priorizar este mes**")
@@ -214,7 +214,7 @@ if pagina == "Inicio":
     st.dataframe(tabla_prioridad_proveedores(f), use_container_width=True, hide_index=True)
     ayuda("Semáforo según el % de solicitudes suspendidas por deuda: 🔴 alta (≥40%), "
           "🟡 media (15–40%), 🟢 baja (<15%). Ordenado por monto detenido: arriba están los "
-          "proveedores con más dinero retenido, donde conviene enfocar las conversaciones.")
+          "proveedores con más dinero retenido, donde conviene enfocar las conversaciones. FILTRAR EN CASO DE QUERER ALGUN AÑO Y/O MES EN PARTICULAR")
 
 
 # ===================== Panorama general =====================
@@ -253,15 +253,15 @@ elif pagina == "Panorama general":
     a.caption("ℹ️ Cómo leerlo: la evolución del gasto mensual. Sirve para ver estacionalidad "
               "y meses atípicos (ej. caídas en enero).")
     est = f["ESTADO CENABAST"].value_counts().reset_index()
-    est.columns = ["Estado", "Líneas"]
+    est.columns = ["Estado", "Cantidad de productos"]
     b.plotly_chart(
-        px.bar(est, x="Estado", y="Líneas", color="Estado", color_discrete_sequence=COL,
+        px.bar(est, x="Estado", y="Cantidad de productos", color="Estado", color_discrete_sequence=COL,
                title="Estado de las solicitudes"),
         use_container_width=True)
     b.caption("ℹ️ Cómo leerlo: cuántas solicitudes hay en cada estado. 'Aprobado' y "
               "'Susp. x deuda' son las que dependen de la gestión interna.")
 
-    st.subheader("Confiabilidad del abastecimiento en el tiempo")
+    st.subheader("Abastecimiento histórico en el tiempo")
     ts = f.groupby("FECHA CRUCE").agg(
         Aprobado=("ESTADO CENABAST", lambda s: (s == "APROBADO").mean() * 100),
         Suspendido=("ESTADO CENABAST", lambda s: (s == "SUSP. X DEUDA").mean() * 100),
@@ -271,7 +271,7 @@ elif pagina == "Panorama general":
                 color_discrete_sequence=COL, labels={"FECHA CRUCE": "Mes"}),
         use_container_width=True)
     ayuda("Cómo usarlo: si la línea de suspendido por deuda sube, el abastecimiento se vuelve "
-          "menos confiable ese mes. Picos indican meses que requieren atención de gestión.")
+          "menos confiable ese mes. Picos indican meses que requieren atención de gestión. PD: Este gráfico deja fuera a los productos con estado Suspendido, Faltante, Eliminado y Pendientes, puesto que, dichos estados son de esclusiva potestad de Cenabast y sus proveedores")
 
 
 # ===================== Puntos de entrega =====================
