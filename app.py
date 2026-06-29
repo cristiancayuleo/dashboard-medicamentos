@@ -531,9 +531,13 @@ elif pagina == "Negociación inteligente (ML)":
                 "ARAMA NATURAL PRODUCTS DISTRIBUIDOR": "OPKO–ARAMA (holding)"}
     consolidar = st.checkbox(
         "Consolidar holdings (tratar OPKO y ARAMA como un solo proveedor para negociar)", value=True)
-    fx = f.copy()
+    fx = f[f["NOMBRE PROVEEDOR"] != "SIN PROVEEDOR ASOCIADO"].copy()
     fx["PROVEEDOR_NEG"] = (fx["NOMBRE PROVEEDOR"].map(lambda x: HOLDINGS.get(x, x))
                            if consolidar else fx["NOMBRE PROVEEDOR"])
+    st.caption("Nota: se excluye de esta sección la categoría *SIN PROVEEDOR ASOCIADO* "
+               "(casos que CENABAST no pudo entregar por término de contrato, problemas de "
+               "suministro u otras incidencias). Al no existir un proveedor con quien negociar, "
+               "incluirla distorsionaría el modelo; se documenta su exclusión por transparencia.")
 
     # ---------- 1) Clasificación ABC ----------
     st.subheader("1️⃣ Clasificación ABC de productos (costeo ABC)")
@@ -622,8 +626,10 @@ elif pagina == "Negociación inteligente (ML)":
 
     with st.expander("📘 ¿Qué es esto y cómo me sirve? (explicación con ejemplo)"):
         st.markdown(
-            "**El problema.** Tenemos ~180 proveedores. Revisarlos uno por uno para decidir a "
-            "quién priorizar es inviable.\n\n"
+            "**El problema.** A lo largo del tiempo han participado ~180 proveedores (histórico). "
+            "Revisarlos uno por uno para decidir a quién priorizar es inviable. *Lo más relevante "
+            "suele ser el último año o el último mes: usa los filtros de Año y Mes de la izquierda "
+            "para enfocar el análisis en los proveedores vigentes.*\n\n"
             "**Qué hace el modelo.** *K-Means* es un modelo de Machine Learning que los **agrupa "
             "automáticamente** según se parezcan en cuatro cosas: cuánto dinero mueven, cuántas "
             "unidades, qué tan variada es su canasta y qué % tienen suspendido por deuda. "
