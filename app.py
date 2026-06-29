@@ -91,7 +91,7 @@ def tabla_centros(df):
         "Monto detenido (+IVA)": sc["monto_detenido"].apply(clp)})
 
 
-# ===================== Barra lateral =====================
+# 1
 st.sidebar.title("Distribución de medicamentos")
 st.sidebar.caption("Cenabast Comunal")
 pagina = st.sidebar.radio(
@@ -123,7 +123,7 @@ if f.empty:
     st.stop()
 
 
-# ===================== Inicio (resumen ejecutivo) =====================
+# 2
 if pagina == "Inicio":
     st.title("Resumen ejecutivo")
     st.caption("Una mirada rápida al estado del abastecimiento de medicamentos de la comuna: "
@@ -217,7 +217,7 @@ if pagina == "Inicio":
           "proveedores con más dinero retenido, donde conviene enfocar las conversaciones. FILTRAR EN CASO DE QUERER ALGUN AÑO Y/O MES EN PARTICULAR")
 
 
-# ===================== Panorama general =====================
+# 3
 elif pagina == "Panorama general":
     st.title("Panorama general de la distribución")
     st.caption("Visión global de lo que se distribuye a la red de salud comunal. "
@@ -274,7 +274,7 @@ elif pagina == "Panorama general":
           "menos confiable ese mes. Picos indican meses que requieren atención de gestión. PD: Este gráfico deja fuera a los productos con estado Suspendido, Faltante, Eliminado y Pendientes, puesto que, dichos estados son de esclusiva potestad de Cenabast y sus proveedores")
 
 
-# ===================== Puntos de entrega =====================
+# 4
 elif pagina == "Puntos de entrega":
     st.title("Puntos de entrega")
     st.caption("Qué llega a cada punto de dispensación de la comuna (el consumidor final). "
@@ -367,7 +367,7 @@ elif pagina == "Puntos de entrega":
               "útil para priorizar negociación y control de stock.")
 
 
-# ===================== Proveedores =====================
+# 5
 elif pagina == "Proveedores":
     st.title("Proveedores que abastecen la red")
     st.caption("Peso de cada proveedor y dónde se concentra el foco de gestión. "
@@ -380,7 +380,7 @@ elif pagina == "Proveedores":
         n_productos=("CODIGO GENERICO", "nunique")).reset_index()
     g["pct_susp"] = base["ESTADO CENABAST"].apply(
         lambda s: (s == "SUSP. X DEUDA").mean()).values * 100
-    # Monto detenido por deuda por proveedor
+    # 5.1
     ms = (f[f["ESTADO CENABAST"] == "SUSP. X DEUDA"]
           .groupby(["RUT PROVEEDOR", "NOMBRE PROVEEDOR", "GRUPO"])["MONTO_IVA"].sum()
           .rename("monto_susp").reset_index())
@@ -440,7 +440,7 @@ elif pagina == "Proveedores":
                  use_container_width=True, height=360, hide_index=True)
 
 
-# ===================== Productos =====================
+# 6
 elif pagina == "Productos":
     st.title("Catálogo de productos y frecuencia")
     st.caption("Volumen, monto y cada cuánto se pide cada producto. Abajo puedes analizar un "
@@ -520,7 +520,7 @@ elif pagina == "Productos":
     st.dataframe(det_tab, use_container_width=True, height=360, hide_index=True)
 
 
-# ===================== Negociación inteligente (ML + ABC) =====================
+# 7
 elif pagina == "Negociación inteligente (ML)":
     st.title("Negociación inteligente: ABC + Machine Learning")
     st.caption("Prioriza dónde negociar combinando tres miradas: clasificación ABC (qué productos "
@@ -539,7 +539,7 @@ elif pagina == "Negociación inteligente (ML)":
                "suministro u otras incidencias). Al no existir un proveedor con quien negociar, "
                "incluirla distorsionaría el modelo; se documenta su exclusión por transparencia.")
 
-    # ---------- 1) Clasificación ABC ----------
+    # 7.1
     st.subheader("1️⃣ Clasificación ABC de productos (costeo ABC)")
     abc = (fx.groupby("NOMBRE GENERICO CANONICO")
            .agg(monto=("MONTO_IVA", "sum"), unidades=("CANTIDAD UNITARIA A DESPACHAR", "sum"))
@@ -619,7 +619,7 @@ elif pagina == "Negociación inteligente (ML)":
           "impacto: negociar mejores precios con ellos mueve la aguja del presupuesto. Con el "
           "holding consolidado, OPKO–ARAMA sube como uno de los más relevantes.")
 
-    # ---------- 2) Segmentación de proveedores (K-Means) ----------
+    # 7.2
     st.subheader("2️⃣ Segmentación de proveedores (modelo de ML · K-Means)")
     st.caption("El modelo agrupa proveedores con comportamiento parecido (no predice: descubre "
                "patrones). Cada grupo se gestiona de forma distinta.")
@@ -746,7 +746,7 @@ elif pagina == "Negociación inteligente (ML)":
     else:
         st.info("Muy pocos proveedores con los filtros actuales para segmentar.")
 
-    # ---------- 3) Simulador de ahorro ----------
+    # 7.3
     st.subheader("3️⃣ Simulador de ahorro por negociación")
     st.caption("En productos básicos de alto volumen, una rebaja pequeña por unidad se multiplica. "
                "Simula cuánto se podría ahorrar y cuánta deuda cubriría.")
